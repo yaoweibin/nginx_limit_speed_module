@@ -1,8 +1,4 @@
 
-/*
- * Copyright (C) Igor Sysoev
- */
-
 
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -32,8 +28,7 @@ typedef struct {
 
 typedef struct {
     ngx_shm_zone_t     *shm_zone;
-    ngx_uint_t          conn;
-    ngx_uint_t          log_level;
+    ngx_uint_t          speed;
 } ngx_http_limit_speed_conf_t;
 
 
@@ -42,58 +37,42 @@ static void ngx_http_limit_speed_cleanup(void *data);
 static void *ngx_http_limit_speed_create_conf(ngx_conf_t *cf);
 static char *ngx_http_limit_speed_merge_conf(ngx_conf_t *cf, void *parent,
     void *child);
-static char *ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd,
+static char *ngx_http_limit_speed_zone(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
-static char *ngx_http_limit_conn(ngx_conf_t *cf, ngx_command_t *cmd,
+static char *ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 static ngx_int_t ngx_http_limit_speed_init(ngx_conf_t *cf);
 
 
-static ngx_conf_enum_t  ngx_http_limit_conn_log_levels[] = {
-    { ngx_string("info"), NGX_LOG_INFO },
-    { ngx_string("notice"), NGX_LOG_NOTICE },
-    { ngx_string("warn"), NGX_LOG_WARN },
-    { ngx_string("error"), NGX_LOG_ERR },
-    { ngx_null_string, 0 }
-};
-
-
 static ngx_command_t  ngx_http_limit_speed_commands[] = {
 
-    { ngx_string("limit_speed"),
+    { ngx_string("limit_speed_zone"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE3,
-      ngx_http_limit_speed,
+      ngx_http_limit_speed_zone,
       0,
       0,
       NULL },
 
-    { ngx_string("limit_conn"),
+    { ngx_string("limit_speed"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
-      ngx_http_limit_conn,
+      ngx_http_limit_speed,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
-
-    { ngx_string("limit_conn_log_level"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_enum_slot,
-      NGX_HTTP_LOC_CONF_OFFSET,
-      offsetof(ngx_http_limit_speed_conf_t, log_level),
-      &ngx_http_limit_conn_log_levels },
 
       ngx_null_command
 };
 
 
 static ngx_http_module_t  ngx_http_limit_speed_module_ctx = {
-    NULL,                                  /* preconfiguration */
+    NULL,                                   /* preconfiguration */
     ngx_http_limit_speed_init,              /* postconfiguration */
 
-    NULL,                                  /* create main configuration */
-    NULL,                                  /* init main configuration */
+    NULL,                                   /* create main configuration */
+    NULL,                                   /* init main configuration */
 
-    NULL,                                  /* create server configuration */
-    NULL,                                  /* merge server configuration */
+    NULL,                                   /* create server configuration */
+    NULL,                                   /* merge server configuration */
 
     ngx_http_limit_speed_create_conf,       /* create location configration */
     ngx_http_limit_speed_merge_conf         /* merge location configration */
@@ -127,21 +106,25 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
     ngx_pool_cleanup_t             *cln;
     ngx_http_variable_value_t      *vv;
     ngx_http_limit_speed_ctx_t      *ctx;
-    ngx_http_limit_speed_node_t     *lz;
-    ngx_http_limit_speed_conf_t     *lzcf;
-    ngx_http_limit_speed_cleanup_t  *lzcln;
+    ngx_http_limit_speed_node_t     *ls;
+    ngx_http_limit_speed_conf_t     *lscf;
+    ngx_http_limit_speed_cleanup_t  *lscln;
 
-    if (r->main->limit_speed_set) {
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "limit speed module: limit_rate=%d r->main=%p r=%p",
+                   r->main->limit_rate, r->main, r);
+
+    if (r->main->limit_rate) {
         return NGX_DECLINED;
     }
 
-    lzcf = ngx_http_get_module_loc_conf(r, ngx_http_limit_speed_module);
+    lscf = ngx_http_get_module_loc_conf(r, ngx_http_limit_speed_module);
 
-    if (lzcf->shm_zone == NULL) {
+    if (lscf->shm_zone == NULL) {
         return NGX_DECLINED;
     }
 
-    ctx = lzcf->shm_zone->data;
+    ctx = lscf->shm_zone->data;
 
     vv = ngx_http_get_indexed_variable(r, ctx->index);
 
@@ -163,8 +146,6 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    r->main->limit_speed_set = 1;
-
     hash = ngx_crc32_short(vv->data, len);
 
     cln = ngx_pool_cleanup_add(r->pool, sizeof(ngx_http_limit_speed_cleanup_t));
@@ -172,7 +153,7 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    shpool = (ngx_slab_pool_t *) lzcf->shm_zone->shm.addr;
+    shpool = (ngx_slab_pool_t *) lscf->shm_zone->shm.addr;
 
     ngx_shmtx_lock(&shpool->mutex);
 
@@ -194,23 +175,13 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
         /* hash == node->key */
 
         do {
-            lz = (ngx_http_limit_speed_node_t *) &node->color;
+            ls = (ngx_http_limit_speed_node_t *) &node->color;
 
-            rc = ngx_memn2cmp(vv->data, lz->data, len, (size_t) lz->len);
+            rc = ngx_memn2cmp(vv->data, ls->data, len, (size_t) ls->len);
 
             if (rc == 0) {
-                if ((ngx_uint_t) lz->conn < lzcf->conn) {
-                    lz->conn++;
-                    goto done;
-                }
-
-                ngx_shmtx_unlock(&shpool->mutex);
-
-                ngx_log_error(lzcf->log_level, r->connection->log, 0,
-                              "limiting connections by zone \"%V\"",
-                              &lzcf->shm_zone->shm.name);
-
-                return NGX_HTTP_SERVICE_UNAVAILABLE;
+                ls->conn++;
+                goto done;
             }
 
             node = (rc < 0) ? node->left : node->right;
@@ -230,27 +201,30 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
         return NGX_HTTP_SERVICE_UNAVAILABLE;
     }
 
-    lz = (ngx_http_limit_speed_node_t *) &node->color;
+    ls = (ngx_http_limit_speed_node_t *) &node->color;
 
     node->key = hash;
-    lz->len = (u_char) len;
-    lz->conn = 1;
-    ngx_memcpy(lz->data, vv->data, len);
+    ls->len = (u_char) len;
+    ls->conn = 1;
+    ngx_memcpy(ls->data, vv->data, len);
 
     ngx_rbtree_insert(ctx->rbtree, node);
 
 done:
 
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "limit zone: %08XD %d", node->key, lz->conn);
+    r->main->limit_rate = lscf->speed / ls->conn;
+
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "limit speed zone: %08XD conn=%d, speed=%d", 
+                   node->key, ls->conn, r->main->limit_rate);
 
     ngx_shmtx_unlock(&shpool->mutex);
 
     cln->handler = ngx_http_limit_speed_cleanup;
-    lzcln = cln->data;
+    lscln = cln->data;
 
-    lzcln->shm_zone = lzcf->shm_zone;
-    lzcln->node = node;
+    lscln->shm_zone = lscf->shm_zone;
+    lscln->node = node;
 
     return NGX_DECLINED;
 }
@@ -261,7 +235,7 @@ ngx_http_limit_speed_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
 {
     ngx_rbtree_node_t           **p;
-    ngx_http_limit_speed_node_t   *lzn, *lznt;
+    ngx_http_limit_speed_node_t   *lsn, *lsnt;
 
     for ( ;; ) {
 
@@ -275,10 +249,10 @@ ngx_http_limit_speed_rbtree_insert_value(ngx_rbtree_node_t *temp,
 
         } else { /* node->key == temp->key */
 
-            lzn = (ngx_http_limit_speed_node_t *) &node->color;
-            lznt = (ngx_http_limit_speed_node_t *) &temp->color;
+            lsn = (ngx_http_limit_speed_node_t *) &node->color;
+            lsnt = (ngx_http_limit_speed_node_t *) &temp->color;
 
-            p = (ngx_memn2cmp(lzn->data, lznt->data, lzn->len, lznt->len) < 0)
+            p = (ngx_memn2cmp(lsn->data, lsnt->data, lsn->len, lsnt->len) < 0)
                 ? &temp->left : &temp->right;
         }
 
@@ -300,26 +274,26 @@ ngx_http_limit_speed_rbtree_insert_value(ngx_rbtree_node_t *temp,
 static void
 ngx_http_limit_speed_cleanup(void *data)
 {
-    ngx_http_limit_speed_cleanup_t  *lzcln = data;
+    ngx_http_limit_speed_cleanup_t  *lscln = data;
 
     ngx_slab_pool_t             *shpool;
     ngx_rbtree_node_t           *node;
     ngx_http_limit_speed_ctx_t   *ctx;
-    ngx_http_limit_speed_node_t  *lz;
+    ngx_http_limit_speed_node_t  *ls;
 
-    ctx = lzcln->shm_zone->data;
-    shpool = (ngx_slab_pool_t *) lzcln->shm_zone->shm.addr;
-    node = lzcln->node;
-    lz = (ngx_http_limit_speed_node_t *) &node->color;
+    ctx = lscln->shm_zone->data;
+    shpool = (ngx_slab_pool_t *) lscln->shm_zone->shm.addr;
+    node = lscln->node;
+    ls = (ngx_http_limit_speed_node_t *) &node->color;
 
     ngx_shmtx_lock(&shpool->mutex);
 
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, lzcln->shm_zone->shm.log, 0,
-                   "limit zone cleanup: %08XD %d", node->key, lz->conn);
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, lscln->shm_zone->shm.log, 0,
+                   "limit speed cleanup: %08XD %d", node->key, ls->conn);
 
-    lz->conn--;
+    ls->conn--;
 
-    if (lz->conn == 0) {
+    if (ls->conn == 0) {
         ngx_rbtree_delete(ctx->rbtree, node);
         ngx_slab_free_locked(shpool, node);
     }
@@ -408,8 +382,6 @@ ngx_http_limit_speed_create_conf(ngx_conf_t *cf)
      *     conf->conn = 0;
      */
 
-    conf->log_level = NGX_CONF_UNSET_UINT;
-
     return conf;
 }
 
@@ -424,18 +396,16 @@ ngx_http_limit_speed_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         *conf = *prev;
     }
 
-    ngx_conf_merge_uint_value(conf->log_level, prev->log_level, NGX_LOG_ERR);
-
     return NGX_CONF_OK;
 }
 
 
 static char *
-ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_limit_speed_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ssize_t                     n;
-    ngx_str_t                  *value;
-    ngx_shm_zone_t             *shm_zone;
+    ssize_t                      n;
+    ngx_str_t                   *value;
+    ngx_shm_zone_t              *shm_zone;
     ngx_http_limit_speed_ctx_t  *ctx;
 
     value = cf->args->elts;
@@ -465,16 +435,15 @@ ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     if (n == NGX_ERROR) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "invalid size of limit_speed \"%V\"", &value[3]);
+                           "invalid size of limit_speed_zone \"%V\"", &value[3]);
         return NGX_CONF_ERROR;
     }
 
     if (n < (ngx_int_t) (8 * ngx_pagesize)) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "limit_speed \"%V\" is too small", &value[1]);
+                           "limit_speed_zone \"%V\" is too small", &value[1]);
         return NGX_CONF_ERROR;
     }
-
 
     shm_zone = ngx_shared_memory_add(cf, &value[1], n,
                                      &ngx_http_limit_speed_module);
@@ -486,7 +455,7 @@ ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ctx = shm_zone->data;
 
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                        "limit_speed \"%V\" is already bound to variable \"%V\"",
+                        "limit_speed_zone \"%V\" is already bound to variable \"%V\"",
                         &value[1], &ctx->var);
         return NGX_CONF_ERROR;
     }
@@ -499,39 +468,33 @@ ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
 static char *
-ngx_http_limit_conn(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ngx_http_limit_speed_conf_t  *lzcf = conf;
+    ngx_http_limit_speed_conf_t  *lscf = conf;
 
     ngx_int_t   n;
     ngx_str_t  *value;
 
-    if (lzcf->shm_zone) {
+    if (lscf->shm_zone) {
         return "is duplicate";
     }
 
     value = cf->args->elts;
 
-    lzcf->shm_zone = ngx_shared_memory_add(cf, &value[1], 0,
+    lscf->shm_zone = ngx_shared_memory_add(cf, &value[1], 0,
                                            &ngx_http_limit_speed_module);
-    if (lzcf->shm_zone == NULL) {
+    if (lscf->shm_zone == NULL) {
         return NGX_CONF_ERROR;
     }
 
-    n = ngx_atoi(value[2].data, value[2].len);
+    n = ngx_parse_size(&value[2]);
     if (n <= 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "invalid number of connections \"%V\"", &value[2]);
+                           "invalid limit speed of connections \"%V\"", &value[2]);
         return NGX_CONF_ERROR;
     }
 
-    if (n > 65535) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "connection limit must be less 65536");
-        return NGX_CONF_ERROR;
-    }
-
-    lzcf->conn = n;
+    lscf->speed = n;
 
     return NGX_CONF_OK;
 }
