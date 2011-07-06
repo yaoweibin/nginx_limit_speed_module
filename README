@@ -54,10 +54,10 @@ When the zone size is 1M then it is possible to handle 32000 sessions with
 
 '''context:''' ''http, server, location''
 
-Directive assigns the sum of maximum speed from the same ip address. For 
-example, if you limit the total speed to 100K with per ip address and there
-are 10 concurrent connections from the same IP, each connection's speed 
-is 10K(100K/10).
+Directive assigns the sum of maximum speed from the same IP address. For 
+example, if you limit the total speed to 100KB per IP address and there
+are 10 concurrent connections from the same IP, each connection speed 
+is 10KB(100KB/10).
 
 = License =
 

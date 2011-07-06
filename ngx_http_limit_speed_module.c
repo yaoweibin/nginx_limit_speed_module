@@ -83,14 +83,14 @@ ngx_module_t  ngx_http_limit_speed_module = {
     NGX_MODULE_V1,
     &ngx_http_limit_speed_module_ctx,       /* module context */
     ngx_http_limit_speed_commands,          /* module directives */
-    NGX_HTTP_MODULE,                       /* module type */
-    NULL,                                  /* init master */
-    NULL,                                  /* init module */
-    NULL,                                  /* init process */
-    NULL,                                  /* init thread */
-    NULL,                                  /* exit thread */
-    NULL,                                  /* exit process */
-    NULL,                                  /* exit master */
+    NGX_HTTP_MODULE,                        /* module type */
+    NULL,                                   /* init master */
+    NULL,                                   /* init module */
+    NULL,                                   /* init process */
+    NULL,                                   /* init thread */
+    NULL,                                   /* exit thread */
+    NULL,                                   /* exit process */
+    NULL,                                   /* exit master */
     NGX_MODULE_V1_PADDING
 };
 
@@ -98,21 +98,17 @@ ngx_module_t  ngx_http_limit_speed_module = {
 static ngx_int_t
 ngx_http_limit_speed_handler(ngx_http_request_t *r)
 {
-    size_t                          len, n;
-    uint32_t                        hash;
-    ngx_int_t                       rc;
-    ngx_slab_pool_t                *shpool;
-    ngx_rbtree_node_t              *node, *sentinel;
-    ngx_pool_cleanup_t             *cln;
-    ngx_http_variable_value_t      *vv;
+    size_t                           len, n;
+    uint32_t                         hash;
+    ngx_int_t                        rc;
+    ngx_slab_pool_t                 *shpool;
+    ngx_rbtree_node_t               *node, *sentinel;
+    ngx_pool_cleanup_t              *cln;
+    ngx_http_variable_value_t       *vv;
     ngx_http_limit_speed_ctx_t      *ctx;
     ngx_http_limit_speed_node_t     *ls;
     ngx_http_limit_speed_conf_t     *lscf;
     ngx_http_limit_speed_cleanup_t  *lscln;
-
-    ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "limit speed module: limit_rate=%d r->main=%p r=%p",
-                   r->main->limit_rate, r->main, r);
 
     if (r->main->limit_rate) {
         return NGX_DECLINED;
@@ -234,7 +230,7 @@ static void
 ngx_http_limit_speed_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
 {
-    ngx_rbtree_node_t           **p;
+    ngx_rbtree_node_t            **p;
     ngx_http_limit_speed_node_t   *lsn, *lsnt;
 
     for ( ;; ) {
@@ -276,10 +272,10 @@ ngx_http_limit_speed_cleanup(void *data)
 {
     ngx_http_limit_speed_cleanup_t  *lscln = data;
 
-    ngx_slab_pool_t             *shpool;
-    ngx_rbtree_node_t           *node;
-    ngx_http_limit_speed_ctx_t   *ctx;
-    ngx_http_limit_speed_node_t  *ls;
+    ngx_slab_pool_t                 *shpool;
+    ngx_rbtree_node_t               *node;
+    ngx_http_limit_speed_ctx_t      *ctx;
+    ngx_http_limit_speed_node_t     *ls;
 
     ctx = lscln->shm_zone->data;
     shpool = (ngx_slab_pool_t *) lscln->shm_zone->shm.addr;
@@ -307,9 +303,9 @@ ngx_http_limit_speed_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 {
     ngx_http_limit_speed_ctx_t  *octx = data;
 
-    size_t                      len;
-    ngx_slab_pool_t            *shpool;
-    ngx_rbtree_node_t          *sentinel;
+    size_t                       len;
+    ngx_slab_pool_t             *shpool;
+    ngx_rbtree_node_t           *sentinel;
     ngx_http_limit_speed_ctx_t  *ctx;
 
     ctx = shm_zone->data;
