@@ -410,16 +410,11 @@ ngx_http_limit_speed_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                   "limit speed rate: %ui rctx: %p %p", r->main->limit_rate,
                   rctx, r);
 
-    if (rctx == NULL) {
-        goto done;
-    }
-
-    if (rctx->ls->conn == 0) {
+    if (rctx == NULL || rctx->ls == NULL || rctx->ls->conn == 0) {
         goto done;
     }
 
     r->main->limit_rate = rctx->speed / rctx->ls->conn;
-
 
 done:
     return ngx_http_next_body_filter(r, in);
@@ -617,7 +612,8 @@ ngx_http_limit_speed(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     n = ngx_parse_size(&value[2]);
     if (n <= 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "invalid limit speed of connections \"%V\"", &value[2]);
+                           "invalid limit speed of connections \"%V\"",
+                           &value[2]);
         return NGX_CONF_ERROR;
     }
 
