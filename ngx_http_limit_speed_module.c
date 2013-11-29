@@ -27,6 +27,7 @@ typedef struct {
 typedef struct {
     ngx_shm_zone_t               *shm_zone;
     ngx_uint_t                    speed;
+    ngx_uint_t                    var_max_len;
 } ngx_http_limit_speed_conf_t;
 
 
@@ -59,6 +60,13 @@ static ngx_command_t  ngx_http_limit_speed_commands[] = {
       ngx_http_limit_speed_zone,
       0,
       0,
+      NULL },
+
+    { ngx_string("limit_speed_zone_var_max_length"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_num_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_limit_speed_conf_t, var_max_len),
       NULL },
 
     { ngx_string("limit_speed"),
@@ -223,12 +231,8 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    if (len > 255) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "the value of the \"%V\" variable "
-                      "is more than 255 bytes: \"%v\"",
-                      &ctx->var, vv);
-        return NGX_DECLINED;
+    if (lscf->var_max_len) {
+        len = len > lscf->var_max_len ? lscf->var_max_len : len;
     }
 
     hash = ngx_crc32_short(vv->data, len);
@@ -283,7 +287,7 @@ ngx_http_limit_speed_handler(ngx_http_request_t *r)
     node = ngx_slab_alloc_locked(shpool, n);
     if (node == NULL) {
         ngx_shmtx_unlock(&shpool->mutex);
-        return NGX_HTTP_SERVICE_UNAVAILABLE;
+        return NGX_DECLINED;
     }
 
     ls = (ngx_http_limit_speed_node_t *) &node->color;
@@ -497,6 +501,8 @@ ngx_http_limit_speed_create_conf(ngx_conf_t *cf)
         return NULL;
     }
 
+    conf->var_max_len = NGX_CONF_UNSET_UINT;
+
     /*
      * set by ngx_pcalloc():
      *
@@ -517,6 +523,8 @@ ngx_http_limit_speed_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     if (conf->shm_zone == NULL) {
         *conf = *prev;
     }
+
+    ngx_conf_merge_uint_value(conf->var_max_len, prev->var_max_len, 0);
 
     return NGX_CONF_OK;
 }
