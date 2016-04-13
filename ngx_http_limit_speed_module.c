@@ -473,6 +473,8 @@ ngx_http_limit_speed_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 
     ctx = shm_zone->data;
 
+    shpool = (ngx_slab_pool_t *) shm_zone->shm.addr;
+
     if (octx) {
         if (ngx_strcmp(ctx->var.data, octx->var.data) != 0) {
             ngx_log_error(NGX_LOG_EMERG, shm_zone->shm.log, 0,
@@ -483,38 +485,34 @@ ngx_http_limit_speed_init_zone(ngx_shm_zone_t *shm_zone, void *data)
         }
 
         ctx->rbtree = octx->rbtree;
+    } else {
 
-        return NGX_OK;
-    }
+        if (shm_zone->shm.exists) {
+            ctx->rbtree = shpool->data;
+        }else {
 
-    shpool = (ngx_slab_pool_t *) shm_zone->shm.addr;
+            ctx->rbtree = ngx_slab_alloc(shpool, sizeof(ngx_rbtree_t));
+            if (ctx->rbtree == NULL) {
+                return NGX_ERROR;
+            }
 
-    if (shm_zone->shm.exists) {
-        ctx->rbtree = shpool->data;
+            shpool->data = ctx->rbtree;
 
-        return NGX_OK;
-    }
+            sentinel = ngx_slab_alloc(shpool, sizeof(ngx_rbtree_node_t));
+            if (sentinel == NULL) {
+                return NGX_ERROR;
+            }
 
-    ctx->rbtree = ngx_slab_alloc(shpool, sizeof(ngx_rbtree_t));
-    if (ctx->rbtree == NULL) {
-        return NGX_ERROR;
-    }
-
-    shpool->data = ctx->rbtree;
-
-    sentinel = ngx_slab_alloc(shpool, sizeof(ngx_rbtree_node_t));
-    if (sentinel == NULL) {
-        return NGX_ERROR;
-    }
-
-    ngx_rbtree_init(ctx->rbtree, sentinel,
+            ngx_rbtree_init(ctx->rbtree, sentinel,
                     ngx_http_limit_speed_rbtree_insert_value);
 
-    len = sizeof(" in limit_speed \"\"") + shm_zone->shm.name.len;
+            len = sizeof(" in limit_speed \"\"") + shm_zone->shm.name.len;
 
-    shpool->log_ctx = ngx_slab_alloc(shpool, len);
-    if (shpool->log_ctx == NULL) {
-        return NGX_ERROR;
+            shpool->log_ctx = ngx_slab_alloc(shpool, len);
+            if (shpool->log_ctx == NULL) {
+                return NGX_ERROR;
+            }
+        }
     }
 
     ngx_http_next_body_filter = ngx_http_top_body_filter;
