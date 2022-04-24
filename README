@@ -1,3 +1,6 @@
+= how to install = 
+please refer to https://www.nginx.com/blog/compiling-dynamic-modules-nginx-plus/
+
 = Synopsis =
 This module makes it possible to limit the total speed of simultaneous 
 connections for the assigned session or as a special case, from one address.
